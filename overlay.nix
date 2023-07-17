@@ -56,4 +56,6 @@ rec {
       steam-fhsenv = scopeSuper.steam-fhsenv-small;
     };
   });
+
+  decky-loader = final.callPackage ./pkgs/decky-loader { };
 }
