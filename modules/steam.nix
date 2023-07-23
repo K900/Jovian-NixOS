@@ -261,6 +261,36 @@ in
           '';
         };
 
+        autoStart = mkOption {
+          type = types.bool;
+          default = false;
+          description = ''
+            Whether to automatically launch the Steam Deck UI on boot.
+
+            No Display Managers may be enabled in conjunction with this option.
+          '';
+        };
+
+        user = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = ''
+            The user to run Steam with.
+          '';
+        };
+
+        desktopSession = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "plasma";
+          description = ''
+            The session to launch for Desktop Mode.
+
+            By default, attempting to switch to the desktop will launch
+            Gaming Mode again.
+          '';
+        };
+
         environment = mkOption {
           type = types.attrsOf types.str;
           default = {};
@@ -322,19 +352,20 @@ in
         HandlePowerKey=ignore
       '';
 
-      # HACK: This is a temporary workaround to allow Steam to perform
-      # power actions (suspend, reboot, poweroff) while running inside
-      # a transient slice.
+      # This rule allows the user to configure Wi-Fi in Deck UI.
+      #
+      # Steam modifies the system network configs via
+      # `org.freedesktop.NetworkManager.settings.modify.system`,
+      # which normally requires being in the `networkmanager` group.
       security.polkit.extraConfig = ''
-        // Jovian-NixOS/steam: Allow users to perform power actions
+        // Jovian-NixOS/steam: Allow users to configure Wi-Fi in Deck UI
         polkit.addRule(function(action, subject) {
-          if ((action.id == "org.freedesktop.login1.suspend" ||
-               action.id == "org.freedesktop.login1.reboot" ||
-               action.id == "org.freedesktop.login1.reboot-multiple-sessions" ||
-               action.id == "org.freedesktop.login1.power-off" ||
-               action.id == "org.freedesktop.login1.power-off-multiple-sessions" ||
-               action.id.indexOf("org.freedesktop.NetworkManager") == 0) &&
-               subject.isInGroup("users")) {
+          if (
+            action.id.indexOf("org.freedesktop.NetworkManager") == 0 &&
+            subject.isInGroup("users") &&
+            subject.local &&
+            subject.active
+          ) {
             return polkit.Result.YES;
           }
         });
@@ -438,6 +469,77 @@ in
         # Expose 8 physical cores, instead of 4c/8t
         WINE_CPU_TOPOLOGY = "8:0,1,2,3,4,5,6,7";
       };
+    })
+    (mkIf cfg.autoStart {
+      assertions = [
+        {
+          assertion = !config.systemd.services.display-manager.enable;
+          message = "No Display Managers must be enabled when jovian.steam.autoStart is used";
+        }
+      ];
+
+      warnings = lib.optional (cfg.desktopSession == null) ''
+        jovian.steam.desktopSession is unset and using the Switch to Desktop function
+        in Gaming Mode will relaunch Gaming Mode.
+
+        Set jovian.steam.desktopSession to the name of a desktop session, or "steam-wayland"
+        to keep this behavior.
+      '';
+
+      services.xserver = {
+        enable = true;
+        displayManager.lightdm.enable = false;
+        displayManager.startx.enable = true;
+      };
+
+      services.greetd = {
+        enable = true;
+        settings = {
+          default_session = let
+            desktopSession = if cfg.desktopSession != null then cfg.desktopSession else "steam-wayland";
+          in {
+            user = "jovian-greeter";
+            command = "${pkgs.jovian-greeter}/bin/jovian-greeter ${cfg.user} ${desktopSession}";
+          };
+        };
+      };
+
+      users.users.jovian-greeter = {
+        isSystemUser = true;
+        group = "jovian-greeter";
+      };
+      users.groups.jovian-greeter = {};
+
+      security.pam.services = {
+        greetd.text = ''
+          auth      requisite     pam_nologin.so
+          auth      sufficient    pam_succeed_if.so user = ${cfg.user} quiet_success
+          auth      required      pam_unix.so
+
+          account   sufficient    pam_unix.so
+
+          password  required      pam_deny.so
+
+          session   optional      pam_keyinit.so revoke
+          session   include       login
+        '';
+      };
+
+      environment = {
+        systemPackages = [ pkgs.jovian-greeter.helper ];
+        pathsToLink = [ "lib/jovian-greeter" ];
+      };
+      security.polkit.extraConfig = ''
+        polkit.addRule(function(action, subject) {
+          if (
+            action.id == "org.freedesktop.policykit.exec" &&
+            action.lookup("program") == "/run/current-system/sw/lib/jovian-greeter/consume-session" &&
+            subject.user == "jovian-greeter"
+          ) {
+            return polkit.Result.YES;
+          }
+        });
+      '';
     })
   ]);
 }
