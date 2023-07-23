@@ -15,7 +15,7 @@ stdenv.mkDerivation {
     runHook preBuild
 
     shellcheck ./consume-session
-    pyright *.py
+    PYTHONPATH="${python3.pkgs.systemd}/${python3.sitePackages}" pyright *.py
 
     runHook postBuild
   '';
@@ -26,7 +26,8 @@ stdenv.mkDerivation {
     mkdir -p $out/{bin,lib/jovian-greeter}
     cp *.py $out/lib/jovian-greeter
     makeWrapper ${python3}/bin/python $out/bin/jovian-greeter \
-      --add-flags "$out/lib/jovian-greeter/greeter.py"
+      --add-flags "$out/lib/jovian-greeter/greeter.py" \
+      --set PYTHONPATH "${python3.pkgs.systemd}/${python3.sitePackages}"
 
     mkdir -p $helper/lib/jovian-greeter
     cp ./consume-session $helper/lib/jovian-greeter

@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any, Optional, Iterable, Mapping, List
 
+from systemd.journal import JournalHandler
+
 DEFAULT_SESSION = 'steam-wayland'
 DEFAULT_DESKTOP = 'plasma'
 HELPER_PREFIX = Path('/run/current-system/sw/lib/jovian-greeter')
@@ -122,6 +124,8 @@ class Context:
             if next_session == 'plasma':
                 next_session = self.desktop_session
 
+            logging.debug("next session: %s", next_session)
+
             sessions = [ next_session ] + sessions
 
         return self._find_sessions(sessions)
@@ -175,6 +179,9 @@ class Context:
         return None
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG)
+    logging.root.addHandler(JournalHandler())
+
     if len(sys.argv) not in [2, 3]:
         logging.error("Usage: jovian-greeter <user> [desktop session]")
         sys.exit(1)
